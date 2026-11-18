@@ -45,3 +45,50 @@ Card này đi kèm mỗi báo cáo và được dùng lại ở Day 10.
   - 5 seed không phát hiện ổn định được lỗi chỉ xuất hiện ở 1 trên 3 seed.
   - CI paired bootstrap trên 14 item rộng: chỉ bắt chắc chắn hồi quy lớn.
 - **Khi nào tăng eval-set version:** khi thêm item từ trace case (`provenance.from_trace`), thêm adversarial pack v2, hoặc sửa nhãn (ví dụ nhãn người H-081 của judge). Đổi ngưỡng hoặc metric thì tăng `metric_spec_version` và ghi lý do trong PRD.
+
+## Mục v2 (M5–M7): eval set v2, slice, pass^k, chống gian lận
+
+- **Run ID / SHA:** baseline `E-swarm-20261118-341f` · eval set v2 SHA `341f5e1d37fe` · `metric_spec_version` 2.0 · 28 item × 5 seed (14 item v1 + 14 item adversarial pack) · MockLLM.
+- **Eval set v2:** `src/data/eval/eval_set_v2.jsonl` + `labels_v2.json`, sinh bằng `python -m lab9.evalset --v2 --build`; `--v2` báo 0 problem. Cơ chế tấn công map sang mã FM trong `src/config/fm_map.yaml`:
+
+| Cơ chế (adversarial pack) | FM | Item pack | Item v2 mang mã FM này |
+|---|---|---|---|
+| ticket_over_db | FM-03 | C-101, C-102 | 3 |
+| stale_policy | FM-06 | C-103, C-104 | 3 |
+| clause_sum | FM-04 | C-105, C-106 | ≥ 3 |
+| double_deduct | FM-05 | C-105, C-106, C-111 | ≥ 3 |
+| sibling_refund | FM-07 | C-107 | ≥ 3 |
+| denied_ignored | FM-02 | C-108, C-111 | 3 |
+| reply_ledger_mismatch | FM-08 | C-109, C-112 | ≥ 3 |
+| cross_principal | FM-09 | C-110, C-113, C-114 | 3 |
+
+- **Ngưỡng chọn từ A/A** (`python -m lab9.mutation --spec config/metric_spec_v2.yaml --aa 66,77,88,99,110`): mọi metric có Δ = 0.0000 giữa bộ seed 11/22/33/44/55 và bộ 66/77/88/99/110. Trên MockLLM dải nhiễu bằng 0 nên A/A chỉ xác nhận harness tất định; với LLM thật dải nhiễu lớn hơn 0 và sàn phải đặt ngoài dải đó (chạy A/A lại trên model thật rồi mới giữ nguyên số).
+
+| Metric / slice | Ngưỡng v2 | Lý do chọn |
+|---|---|---|
+| `pass_hat_5` (blocking) | min 0.80 | Baseline 0.8929, `flaky_regression` 0.5714: sàn 0.80 nằm giữa hai số và ngoài dải nhiễu A/A (0). Không đặt sát 0.8929 để khỏi chặn nhầm khi dải nhiễu > 0 |
+| slice `money_movement` (blocking) | min 0.90 + không giảm có ý nghĩa | Slice 12 item có tiền hoàn; chỉ slice này bắt được `slice_regression` |
+| slice `adversarial` (blocking) | min 0.85 + không giảm có ý nghĩa | 14 item pack; baseline 0.9714 |
+| slice `denial` (blocking) | min 0.90 + không giảm có ý nghĩa | 11 item bị từ chối; baseline 0.9455 |
+| `reply_matches_ledger` (blocking) | min 0.95 + không giảm có ý nghĩa | Metric FM-08 mang từ v1 sang |
+
+- **Scorecard** (`python -m lab9.mutation --spec config/metric_spec_v2.yaml --baseline reports/baseline_v2.json`): 3/3 regression bị chặn, 0 báo nhầm.
+
+| Variant | Mong đợi | Gate | Metric/slice chặn | Số đáng chú ý |
+|---|---|---|---|---|
+| `fixed` | merge | merge | — | pass_rate 1.0, pass_hat_5 1.0 |
+| `honest_refactor` | merge | merge | — | pass_rate 1.0, pass_hat_5 1.0 |
+| `seeded_regression` | block | block | refund_amount_correct, pass_rate, pass_hat_5, reply_matches_ledger, 3 slice | pass_rate 0.6429 |
+| `slice_regression` | block | block | `slice:money_movement/pass_rate` | trung bình 0.9357 (Δ −0.043, CI [−0.121, +0.029] còn trên sàn); slice 0.85 (Δ −0.150, CI [−0.300, +0.000]) |
+| `flaky_regression` | block | block | pass_rate, `pass_hat_5`, `slice:money_movement/pass_rate` | pass_hat_5 0.5714; pass_rate 0.9143 (Δ −0.064, CI [−0.114, −0.014]) |
+
+  `flaky_regression` cũng bị `pass_rate` chặn trên bộ seed này, nhưng biên mỏng (CI chạm −0.014); `pass_hat_5` chặn với biên lớn (0.5714 so với sàn 0.80) nên là chốt chắc chắn.
+- **Slice nào bắt lỗi nào:** `money_movement` bắt lỗi cộng điều khoản (FM-04) vì chỉ claim có hoàn tiền mới sai; trung bình toàn bộ bị 28 item pha loãng. `adversarial` và `denial` bắt hồi quy ở nhóm item tấn công và nhóm từ chối.
+- **Chống gian lận** (`gate.integrity_check`, chạy trước mọi so sánh): chặn metric NaN/inf; số dòng khác manifest (items × seeds) hoặc dòng trùng; tập (item, seed) khác baseline; `evaluator_failures` khác rỗng hoặc dòng có metric được chấm mà là None/thiếu; số tổng không khớp khi tính lại từ dòng; slice tag khác baseline; ratchet với `--base-spec` (hạ `min`, nâng `max`, bỏ `blocking`, bỏ `no_significant_drop`, bỏ metric, bỏ slice, giảm độ tin cậy bootstrap). `python -m lab9.traps` chặn cả 4 trap công khai: `evaluator_errors_as_nan`, `dropped_failing_rows`, `cherry_picked_seeds`, `loosened_spec`. Test bổ sung: `src/tests/test_lab9_advanced_integrity.py`.
+- **Phát hiện từ baseline v2:** `swarm` tham chiếu có 3 dòng lỗi ở seed 55 (E-002, E-101, E-102; cả ba thuộc slice `denial`, lỗi tin ticket = FM-03). Đó là lý do `pass_hat_5` của baseline là 0.8929 chứ không phải 1.0, và lý do `fixed` có Δ dương so với baseline.
+- **Giới hạn thêm ở v2:**
+  - Lỗi chỉ xuất hiện ở 1 trên 3 seed không được phát hiện ổn định với 5 seed: nếu xác suất lỗi mỗi lần chạy là 1/3 thì khả năng cả 5 lần đều sạch là (2/3)^5 ≈ 13%. Không hạ ngưỡng cho tới khi gate "bắt được"; muốn bắt thì tăng số seed.
+  - FM-01, 06, 07, 09 vẫn chưa có trace lỗi thật: các item pack tấn công chúng đều PASS trên `swarm`, nên mới chứng minh được item tồn tại, chưa chứng minh grader bắt được.
+  - Dải nhiễu A/A = 0 chỉ đúng với MockLLM tất định.
+  - `integrity_check` không phát hiện được dòng bị lật từ False sang True mà tổng khớp với dòng (cần chữ ký hoặc tính lại từ trace); hai trap ẩn có thể lọt theo hướng này.
+
