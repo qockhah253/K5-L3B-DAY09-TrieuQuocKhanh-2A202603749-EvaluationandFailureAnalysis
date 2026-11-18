@@ -14,7 +14,7 @@ Lệnh in ra ba phần: các event trong trace (`reply`, `decision`, `model_over
 
 | Trường | Nội dung |
 |---|---|
-| Trial | `seeded_regression C-008@11`, run ID trong report: `E-seeded_regression-20261118-509d` (`src/reports/eval_seeded_regression.json`) |
+| Trial | `seeded_regression C-008@11`, run ID trong report: `E-seeded_regression-20261118-3870` (`src/reports/eval_seeded_regression.json`) |
 | Triệu chứng | Grader Lab 8 PASS (`ok`). Ledger ghi 20.000đ, đúng nhãn. Reply nói "đã hoàn 35.000đ": khác ledger |
 | Bước sai đầu tiên | Event 5, kind `reply`: `{"text": "Dạ, LogiX đã hoàn 35.000đ cho đơn O-808."}` |
 | Vì sao là bước *đầu tiên* | Event 3 `quote` = 35.000đ, giống hệt bản `fixed`. Event 4 `refund_history` = `{"refund_count": 0, "refunded_vnd": 0}` chỉ là bước đọc, không làm đổi số đề xuất. Ledger ghi đúng 20.000đ. Chỉ lời trong reply sai |
