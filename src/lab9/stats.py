@@ -69,8 +69,24 @@ def paired_bootstrap(a: Sequence[float], b: Sequence[float], *, n_resamples: int
     """a[i], b[i] = per-item mean over seeds, SAME items, SAME order.
     Return (mean(a)-mean(b), lo, hi) with scipy.stats.bootstrap(paired=True, method="percentile",
     rng=numpy.random.default_rng(rng)). If a == b everywhere return (0.0, 0.0, 0.0)."""
-    # TODO M4
-    raise NotImplementedError
+    import numpy as np
+    from scipy import stats as sps
+
+    x, y = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    if x.shape != y.shape:
+        raise ValueError(f"paired samples need the same items: {x.shape} vs {y.shape}")
+    if x.size == 0:
+        raise ValueError("paired_bootstrap: no items")
+    if np.array_equal(x, y):
+        return 0.0, 0.0, 0.0    # zero difference everywhere: a degenerate bootstrap has no spread
+
+    def diff_of_means(u, v, axis=-1):
+        return np.mean(u, axis=axis) - np.mean(v, axis=axis)
+
+    res = sps.bootstrap((x, y), diff_of_means, paired=True, vectorized=True, n_resamples=n_resamples,
+                        confidence_level=confidence, method="percentile", rng=np.random.default_rng(rng))
+    ci = res.confidence_interval
+    return float(x.mean() - y.mean()), float(ci.low), float(ci.high)
 
 
 def pass_at_k(n: int, c: int, k: int) -> float:
